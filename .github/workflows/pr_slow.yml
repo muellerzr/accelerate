@@ -85,7 +85,7 @@ jobs:
 
   monitor-reaction:
     runs-on: ubuntu-latest
-    if: github.event.comment.reactions && contains(github.event.comment.reactions, '👍')
+    if: github.event.reaction && github.event.reaction.content == '+1'
     
     steps:
       - name: Check reaction permissions
