@@ -161,7 +161,7 @@ jobs:
               let statusMessage = 'Workflow results:\n';
               for (const workflow of workflows) {
                 const result = workflowResults[workflow];
-                statusMessage += `\n* ${workflow}: ${result.conclusion === 'success' ? '✅' : '❌'} ${result.conclusion} [Run Details](${result.url})`;
+                statusMessage += `\n* ${workflow}: ${result.conclusion === 'success' ? '✅' : '❌'} [Run Details](${result.url})`;
                 if (workflowSummaries[workflow]) {
                   statusMessage += workflowSummaries[workflow];
                 }
