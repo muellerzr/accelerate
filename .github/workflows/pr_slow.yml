@@ -83,7 +83,7 @@ jobs:
               const botComments = comments.data.filter(comment => 
                 comment.user.login === 'github-actions[bot]' &&
                 (comment.body.includes(`Triggered workflow:`) || 
-                 comment.body.includes(`Workflow ${workflow} completed with status`))
+                 comment.body.includes(`completed with status`))
               );
               
               const lastBotComment = botComments[botComments.length - 1];
@@ -168,37 +168,6 @@ jobs:
               }
               
             } catch (error) {
-              // Try to get any job summaries from the error context
-              let summary = '';
-              if (error.runId) {
-                try {
-                  const jobsResponse = await github.rest.actions.listJobsForWorkflowRun({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    run_id: error.runId
-                  });
-
-                  for (const job of jobsResponse.data.jobs) {
-                    const jobId = job.html_url.split('/').pop();
-                    const summaryUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${error.runId}/jobs/${jobId}/summary_raw`;
-                    
-                    try {
-                      const response = await fetch(summaryUrl);
-                      if (response.ok) {
-                        const summaryText = await response.text();
-                        if (summaryText) {
-                          summary += `\n\nError Job Summary for ${job.name}:\n${summaryText}`;
-                        }
-                      }
-                    } catch (e) {
-                      // If we can't get a particular job summary, continue to the next
-                    }
-                  }
-                } catch (e) {
-                  // If we can't get job info, continue without summaries
-                }
-              }
-
               const errorMessage = `Error with workflow: ${error.message}${summary}`;
               
               // Find last bot comment
@@ -211,7 +180,7 @@ jobs:
               const botComments = comments.data.filter(comment => 
                 comment.user.login === 'github-actions[bot]' &&
                 (comment.body.includes(`Triggered workflow:`) || 
-                 comment.body.includes(`Workflow ${workflow} completed with status`))
+                 comment.body.includes(`completed with status`))
               );
               
               const lastBotComment = botComments[botComments.length - 1];
