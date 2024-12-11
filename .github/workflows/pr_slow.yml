@@ -121,17 +121,23 @@ jobs:
                 if (runs.data.workflow_runs.length > 0) {
                   const run = runs.data.workflow_runs[0];
                   if (run.status === 'completed') {
-                    // Get the run summary if it exists
+                    // Get the step summary if it exists
                     let summary = '';
                     try {
-                      const summaryResponse = await github.rest.actions.downloadWorkflowRunLogs({
+                      const summaryResponse = await github.rest.actions.getWorkflowRunAttempt({
                         owner: context.repo.owner,
                         repo: context.repo.repo,
-                        run_id: run.id
+                        run_id: run.id,
+                        attempt_number: run.run_attempt
                       });
-                      if (summaryResponse.data) {
-                        const summaryText = Buffer.from(summaryResponse.data).toString('utf8');
-                        summary = `\n\nSummary:\n${summaryText}`;
+                      if (summaryResponse.data.steps) {
+                        const stepSummaries = summaryResponse.data.steps
+                          .filter(step => step.summary)
+                          .map(step => step.summary)
+                          .join('\n');
+                        if (stepSummaries) {
+                          summary = `\n\nSummary:\n${stepSummaries}`;
+                        }
                       }
                     } catch (e) {
                       // If we can't get the summary, just continue without it
@@ -157,14 +163,20 @@ jobs:
               let summary = '';
               if (error.runId) {
                 try {
-                  const summaryResponse = await github.rest.actions.downloadWorkflowRunLogs({
+                  const summaryResponse = await github.rest.actions.getWorkflowRunAttempt({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
-                    run_id: error.runId
+                    run_id: error.runId,
+                    attempt_number: 1
                   });
-                  if (summaryResponse.data) {
-                    const summaryText = Buffer.from(summaryResponse.data).toString('utf8');
-                    summary = `\n\nError Summary:\n${summaryText}`;
+                  if (summaryResponse.data.steps) {
+                    const stepSummaries = summaryResponse.data.steps
+                      .filter(step => step.summary)
+                      .map(step => step.summary)
+                      .join('\n');
+                    if (stepSummaries) {
+                      summary = `\n\nError Summary:\n${stepSummaries}`;
+                    }
                   }
                 } catch (e) {
                   // If we can't get the summary, just continue without it
