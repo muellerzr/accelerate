@@ -9,9 +9,6 @@
 #  - When using a docker container, it's recommended to set `--shm-size`, we use 16gb.
 name: Integration Tests (push to "main")
 
-on:
-  workflow_call:
-  workflow_dispatch:
 
 env:
   HF_HOME: ~/hf_cache

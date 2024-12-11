@@ -1,9 +1,5 @@
 name: Stale Bot
 
-on:
-  schedule:
-    - cron: "0 15 * * *"
-  workflow_dispatch:
 
 jobs:
   close_stale_issues:

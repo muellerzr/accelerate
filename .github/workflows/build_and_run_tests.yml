@@ -1,11 +1,5 @@
 name: Trigger docker images and run tests
 
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
