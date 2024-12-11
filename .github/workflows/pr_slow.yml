@@ -49,6 +49,7 @@ jobs:
         if: steps.check_permissions.outputs.result == 'true'
         run: |
           echo "Workflow to run: ${{ steps.parse.outputs.workflow }}"
+
       - name: Trigger workflow
         if: steps.check_permissions.outputs.result == 'true'
         uses: actions/github-script@v6
@@ -58,6 +59,7 @@ jobs:
             const prDetails = JSON.parse('${{ steps.pr_details.outputs.result }}');
             
             try {
+              // Trigger the workflow
               await github.rest.actions.createWorkflowDispatch({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -69,7 +71,18 @@ jobs:
                 }
               });
               
-              // Find existing bot comment
+              // Handle the success message
+              const message = `Triggered workflow: ${workflow}\nWaiting for results...`;
+              await updateOrCreateComment(message);
+              
+            } catch (error) {
+              // Handle any errors
+              const errorMessage = `Error triggering workflow: ${error.message}`;
+              await updateOrCreateComment(errorMessage);
+            }
+
+            // Helper function to update or create comments
+            async function updateOrCreateComment(message) {
               const comments = await github.rest.issues.listComments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -80,11 +93,8 @@ jobs:
                 comment.user.login === 'github-actions[bot]' && 
                 comment.body.includes('Triggered workflow:')
               );
-
-              const message = `Triggered workflow: ${workflow}\nWaiting for results...`;
               
               if (botComment) {
-                // Update existing comment
                 await github.rest.issues.updateComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -92,41 +102,11 @@ jobs:
                   body: message
                 });
               } else {
-                // Create new comment if none exists
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
-                  repo: context.repo.repo, 
+                  repo: context.repo.repo,
                   issue_number: context.issue.number,
                   body: message
-                });
-              }
-            } catch (error) {
-              const comments = await github.rest.issues.listComments({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number
-              });
-              
-              const botComment = comments.data.find(comment =>
-                comment.user.login === 'github-actions[bot]' &&
-                comment.body.includes('Triggered workflow:')
-              );
-
-              const errorMessage = `Error triggering workflow: ${error.message}`;
-
-              if (botComment) {
-                await github.rest.issues.updateComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: botComment.id, 
-                  body: errorMessage
-                });
-              } else {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: errorMessage
                 });
               }
             }
