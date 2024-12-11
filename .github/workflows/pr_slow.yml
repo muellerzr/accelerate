@@ -60,8 +60,10 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const workflows = '${{ steps.parse.outputs.workflows }}'.trim().split(/\s+/);
-            const prDetails = JSON.parse('${{ steps.pr_details.outputs.result }}');
+            const workflows = JSON.parse(process.env.WORKFLOWS_OUTPUT || '[]');
+            const prDetails = JSON.parse(process.env.GITHUB_OUTPUTS_WORKFLOWS || '[]');
+            if (!Array.isArray(workflows)) throw new Error('Invalid workflows format');
+            if (typeof prDetails !== 'object') throw new Error('Invalid PR details format');
             
             async function findOrCreateBotComment(github, context) {
               const comments = await github.rest.issues.listComments({
