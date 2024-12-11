@@ -39,14 +39,14 @@ jobs:
               head_repo: pr.head.repo.full_name
             }
 
-      - name: Parse workflow name
+      - name: Parse workflow names
         if: steps.check_permissions.outputs.result == 'true'
         id: parse
         run: |
           COMMENT="${{ github.event.comment.body }}"
-          # Find the first line starting with !run and extract just that command
-          WORKFLOW_NAME=$(echo "$COMMENT" | grep -m 1 "^!run" | sed 's/^!run[[:space:]]*\([^[:space:]]*\).*/\1/')
-          echo "workflow=$WORKFLOW_NAME" >> $GITHUB_OUTPUT
+          # Find all lines starting with !run and extract workflow names
+          WORKFLOW_NAMES=$(echo "$COMMENT" | grep "^!run" | sed 's/^!run[[:space:]]*\([^[:space:]]*\).*/\1/' | tr '\n' ' ')
+          echo "workflows=$WORKFLOW_NAMES" >> $GITHUB_OUTPUT
 
       - name: Checkout PR code
         if: steps.check_permissions.outputs.result == 'true'
@@ -56,140 +56,132 @@ jobs:
           ref: ${{ fromJson(steps.pr_details.outputs.result).head_ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run workflow and monitor
+      - name: Run workflows and monitor
         if: steps.check_permissions.outputs.result == 'true'
         uses: actions/github-script@v6
         with:
           script: |
-            const workflow = '${{ steps.parse.outputs.workflow }}';
+            const workflows = '${{ steps.parse.outputs.workflows }}'.trim().split(/\s+/);
             const prDetails = JSON.parse('${{ steps.pr_details.outputs.result }}');
+            let commentId;
             
             try {
-              // Run the workflow
-              await github.rest.actions.createWorkflowDispatch({
+              // Create initial status comment
+              const initialComment = await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                workflow_id: `${workflow}.yml`,
-                ref: prDetails.head_ref
+                issue_number: context.issue.number,
+                body: `Triggered workflows: ${workflows.join(', ')}\nUsing code from: ${prDetails.head_repo}@${prDetails.head_ref}\nWaiting for results...`
               });
-              
-              // Find last bot comment
-              const comments = await github.rest.issues.listComments({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number
-              });
-              
-              const botComments = comments.data.filter(comment => 
-                comment.user.login === 'github-actions[bot]' &&
-                (comment.body.includes(`Triggered workflow:`) || 
-                 comment.body.includes(`completed with status`))
-              );
-              
-              const lastBotComment = botComments[botComments.length - 1];
-              
-              if (lastBotComment) {
-                await github.rest.issues.updateComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: lastBotComment.id,
-                  body: `Triggered workflow: ${workflow}\nUsing code from: ${prDetails.head_repo}@${prDetails.head_ref}\nWaiting for results...`
-                });
-                commentId = lastBotComment.id;
-              } else {
-                const initialComment = await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: `Triggered workflow: ${workflow}\nUsing code from: ${prDetails.head_repo}@${prDetails.head_ref}\nWaiting for results...`
-                });
-                commentId = initialComment.data.id;
-              }
+              commentId = initialComment.data.id;
 
-              // Wait for workflow to start (give it 30 seconds)
-              await new Promise(resolve => setTimeout(resolve, 30000));
-
-              // Monitor the workflow until completion
-              let isComplete = false;
-              while (!isComplete) {
-                const runs = await github.rest.actions.listWorkflowRuns({
+              // Trigger all workflows
+              for (const workflow of workflows) {
+                await github.rest.actions.createWorkflowDispatch({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   workflow_id: `${workflow}.yml`,
-                  head_sha: prDetails.head_sha,
-                  per_page: 1
+                  ref: prDetails.head_ref
                 });
+              }
 
-                if (runs.data.workflow_runs.length > 0) {
-                  const run = runs.data.workflow_runs[0];
-                  if (run.status === 'completed') {
-                    // Get the job summaries
-                    let summary = '';
-                    try {
-                      const jobsResponse = await github.rest.actions.listJobsForWorkflowRun({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        run_id: run.id
-                      });
+              // Wait for workflows to start
+              await new Promise(resolve => setTimeout(resolve, 30000));
 
-                      for (const job of jobsResponse.data.jobs) {
-                        const jobId = job.html_url.split('/').pop();
-                        const summaryUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}/jobs/${jobId}/summary_raw`;
-                        
-                        try {
-                          const response = await fetch(summaryUrl);
-                          if (response.ok) {
-                            const summaryText = await response.text();
-                            if (summaryText) {
-                              summary += `\n\nJob Summary for ${job.name}:\n${summaryText}`;
+              // Monitor all workflows until completion
+              let allComplete = false;
+              let workflowResults = {};
+              let workflowSummaries = {};
+
+              while (!allComplete) {
+                allComplete = true;
+
+                for (const workflow of workflows) {
+                  if (workflowResults[workflow]) continue;
+
+                  const runs = await github.rest.actions.listWorkflowRuns({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    workflow_id: `${workflow}.yml`,
+                    head_sha: prDetails.head_sha,
+                    per_page: 1
+                  });
+
+                  if (runs.data.workflow_runs.length > 0) {
+                    const run = runs.data.workflow_runs[0];
+                    if (run.status === 'completed') {
+                      workflowResults[workflow] = {
+                        conclusion: run.conclusion,
+                        url: run.html_url
+                      };
+
+                      // Get job summaries
+                      let summary = '';
+                      try {
+                        const jobsResponse = await github.rest.actions.listJobsForWorkflowRun({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          run_id: run.id
+                        });
+
+                        for (const job of jobsResponse.data.jobs) {
+                          const jobId = job.html_url.split('/').pop();
+                          const summaryUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}/jobs/${jobId}/summary_raw`;
+                          
+                          try {
+                            const response = await fetch(summaryUrl);
+                            if (response.ok) {
+                              const summaryText = await response.text();
+                              if (summaryText) {
+                                summary += `\n\nJob Summary for ${job.name}:\n${summaryText}`;
+                              }
                             }
+                          } catch (e) {
+                            // Continue if we can't get a particular job summary
                           }
-                        } catch (e) {
-                          // If we can't get a particular job summary, continue to the next
                         }
+                        workflowSummaries[workflow] = summary;
+                      } catch (e) {
+                        // Continue without summaries if we can't get job info
                       }
-                    } catch (e) {
-                      // If we can't get job info, continue without summaries
+                    } else {
+                      allComplete = false;
                     }
-
-                    await github.rest.issues.updateComment({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      comment_id: commentId,
-                      body: `Workflow ${workflow} completed with status: ${run.conclusion}\nRun details: ${run.html_url}${summary}`
-                    });
-                    isComplete = true;
+                  } else {
+                    allComplete = false;
                   }
                 }
 
-                if (!isComplete) {
+                if (!allComplete) {
                   await new Promise(resolve => setTimeout(resolve, 30000)); // Check every 30 seconds
                 }
               }
-              
-            } catch (error) {
-              const errorMessage = `Error with workflow: ${error.message}${summary}`;
-              
-              // Find last bot comment
-              const comments = await github.rest.issues.listComments({
+
+              // Build final status message
+              let statusMessage = 'Workflow results:\n';
+              for (const workflow of workflows) {
+                const result = workflowResults[workflow];
+                statusMessage += `\n${workflow}: ${result.conclusion}\nRun details: ${result.url}`;
+                if (workflowSummaries[workflow]) {
+                  statusMessage += workflowSummaries[workflow];
+                }
+              }
+
+              await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number
+                comment_id: commentId,
+                body: statusMessage
               });
               
-              const botComments = comments.data.filter(comment => 
-                comment.user.login === 'github-actions[bot]' &&
-                (comment.body.includes(`Triggered workflow:`) || 
-                 comment.body.includes(`completed with status`))
-              );
+            } catch (error) {
+              const errorMessage = `Error with workflows: ${error.message}`;
               
-              const lastBotComment = botComments[botComments.length - 1];
-              
-              if (lastBotComment) {
+              if (commentId) {
                 await github.rest.issues.updateComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  comment_id: lastBotComment.id,
+                  comment_id: commentId,
                   body: errorMessage
                 });
               } else {
