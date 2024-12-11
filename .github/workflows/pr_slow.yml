@@ -63,7 +63,6 @@ jobs:
           script: |
             const workflow = '${{ steps.parse.outputs.workflow }}';
             const prDetails = JSON.parse('${{ steps.pr_details.outputs.result }}');
-            let commentId = null;
             
             try {
               // Run the workflow
@@ -74,26 +73,29 @@ jobs:
                 ref: prDetails.head_ref
               });
               
-              // Find existing bot comment or create new one
+              // Find last bot comment
               const comments = await github.rest.issues.listComments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number
               });
               
-              const botComment = comments.data.find(comment => 
-                comment.user.login === 'github-actions[bot]' && 
-                comment.body.includes(`Triggered workflow: ${workflow}`)
+              const botComments = comments.data.filter(comment => 
+                comment.user.login === 'github-actions[bot]' &&
+                (comment.body.includes(`Triggered workflow:`) || 
+                 comment.body.includes(`Workflow ${workflow} completed with status`))
               );
               
-              if (botComment) {
-                commentId = botComment.id;
+              const lastBotComment = botComments[botComments.length - 1];
+              
+              if (lastBotComment) {
                 await github.rest.issues.updateComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  comment_id: commentId,
+                  comment_id: lastBotComment.id,
                   body: `Triggered workflow: ${workflow}\nUsing code from: ${prDetails.head_repo}@${prDetails.head_ref}\nWaiting for results...`
                 });
+                commentId = lastBotComment.id;
               } else {
                 const initialComment = await github.rest.issues.createComment({
                   owner: context.repo.owner,
@@ -198,40 +200,35 @@ jobs:
               }
 
               const errorMessage = `Error with workflow: ${error.message}${summary}`;
-              if (commentId) {
+              
+              // Find last bot comment
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number
+              });
+              
+              const botComments = comments.data.filter(comment => 
+                comment.user.login === 'github-actions[bot]' &&
+                (comment.body.includes(`Triggered workflow:`) || 
+                 comment.body.includes(`Workflow ${workflow} completed with status`))
+              );
+              
+              const lastBotComment = botComments[botComments.length - 1];
+              
+              if (lastBotComment) {
                 await github.rest.issues.updateComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  comment_id: commentId,
+                  comment_id: lastBotComment.id,
                   body: errorMessage
                 });
               } else {
-                // Find existing bot error comment or create new one
-                const comments = await github.rest.issues.listComments({
+                await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  issue_number: context.issue.number
+                  issue_number: context.issue.number,
+                  body: errorMessage
                 });
-                
-                const botErrorComment = comments.data.find(comment => 
-                  comment.user.login === 'github-actions[bot]' && 
-                  comment.body.includes('Error with workflow')
-                );
-                
-                if (botErrorComment) {
-                  await github.rest.issues.updateComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    comment_id: botErrorComment.id,
-                    body: errorMessage
-                  });
-                } else {
-                  await github.rest.issues.createComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: context.issue.number,
-                    body: errorMessage
-                  });
-                }
               }
             }
