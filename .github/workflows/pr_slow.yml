@@ -132,11 +132,11 @@ jobs:
                       });
                       if (summaryResponse.data.steps) {
                         const stepSummaries = summaryResponse.data.steps
-                          .filter(step => step.summary)
-                          .map(step => step.summary)
+                          .filter(step => step.step_summary || step.summary)
+                          .map(step => step.step_summary || step.summary)
                           .join('\n');
                         if (stepSummaries) {
-                          summary = `\n\nSummary:\n${stepSummaries}`;
+                          summary = `\n\nStep Summary:\n${stepSummaries}`;
                         }
                       }
                     } catch (e) {
@@ -171,11 +171,11 @@ jobs:
                   });
                   if (summaryResponse.data.steps) {
                     const stepSummaries = summaryResponse.data.steps
-                      .filter(step => step.summary)
-                      .map(step => step.summary)
+                      .filter(step => step.step_summary || step.summary)
+                      .map(step => step.step_summary || step.summary)
                       .join('\n');
                     if (stepSummaries) {
-                      summary = `\n\nError Summary:\n${stepSummaries}`;
+                      summary = `\n\nError Step Summary:\n${stepSummaries}`;
                     }
                   }
                 } catch (e) {
