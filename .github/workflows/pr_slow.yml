@@ -45,7 +45,10 @@ jobs:
           COMMENT="${{ github.event.comment.body }}"
           WORKFLOW_NAME=$(echo "$COMMENT" | awk -F'\n' '/^!run/ {sub(/^!run */, ""); print $1; exit}')
           echo "workflow=$WORKFLOW_NAME" >> $GITHUB_OUTPUT
-          echo "workflow=$WORKFLOW_NAME"
+      - name: Echo workflow name
+        if: steps.check_permissions.outputs.result == 'true'
+        run: |
+          echo "Workflow to run: ${{ steps.parse.outputs.workflow }}"
       - name: Trigger workflow
         if: steps.check_permissions.outputs.result == 'true'
         uses: actions/github-script@v6
