@@ -44,7 +44,6 @@ jobs:
         id: parse
         run: |
           COMMENT="${{ github.event.comment.body }}"
-          # Find all lines starting with !run and extract workflow names
           WORKFLOW_NAMES=$(echo "$COMMENT" | grep "^!run" | sed 's/^!run[[:space:]]*\([^[:space:]]*\).*/\1/' | tr '\n' ' ')
           echo "workflows=$WORKFLOW_NAMES" >> $GITHUB_OUTPUT
 
@@ -63,41 +62,37 @@ jobs:
           script: |
             const workflows = '${{ steps.parse.outputs.workflows }}'.trim().split(/\s+/);
             const prDetails = JSON.parse('${{ steps.pr_details.outputs.result }}');
-            let botCommentId = null;
             
-            try {
-              // Find existing bot comment
+            async function findOrCreateBotComment(github, context) {
               const comments = await github.rest.issues.listComments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number
               });
               
-              const botComment = comments.data.find(comment => comment.user.login === 'github-actions[bot]');
-              
-              // Initial status message
-              const initialMessage = `Triggered workflows: ${workflows.join(', ')}\nUsing code from: [${prDetails.head_repo}@${prDetails.head_ref}](https://github.com/${prDetails.head_repo}/tree/${prDetails.head_ref})\n:hourglass: Waiting for results... :hourglass:`;
+              return comments.data.find(comment => comment.user.login === 'github-actions[bot]');
+            }
 
-              // Create or update comment
-              if (botComment) {
-                botCommentId = botComment.id;
+            async function updateBotComment(github, context, commentId, message) {
+              if (commentId) {
                 await github.rest.issues.updateComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  comment_id: botCommentId,
-                  body: initialMessage
+                  comment_id: commentId,
+                  body: message
                 });
               } else {
                 const newComment = await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: context.issue.number,
-                  body: initialMessage
+                  body: message
                 });
-                botCommentId = newComment.data.id;
+                return newComment.data.id;
               }
+            }
 
-              // Trigger all workflows
+            async function triggerWorkflows(github, context, workflows, prDetails) {
               for (const workflow of workflows) {
                 await github.rest.actions.createWorkflowDispatch({
                   owner: context.repo.owner,
@@ -106,18 +101,40 @@ jobs:
                   ref: prDetails.head_ref
                 });
               }
+            }
 
-              // Wait for workflows to start
-              await new Promise(resolve => setTimeout(resolve, 30000));
+            async function getJobSummaries(github, context, run) {
+              let summary = '';
+              const jobsResponse = await github.rest.actions.listJobsForWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id
+              });
 
-              // Monitor all workflows until completion
-              let allComplete = false;
-              let workflowResults = {};
-              let workflowSummaries = {};
+              for (const job of jobsResponse.data.jobs) {
+                const jobId = job.html_url.split('/').pop();
+                const summaryUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}/jobs/${jobId}/summary_raw`;
+                
+                try {
+                  const response = await fetch(summaryUrl);
+                  if (response.ok) {
+                    const summaryText = await response.text();
+                    if (summaryText) {
+                      summary += `\n\nJob Summary for ${job.name}:\n${summaryText}`;
+                    }
+                  }
+                } catch (e) {
+                  continue;
+                }
+              }
+              return summary;
+            }
 
-              while (!allComplete) {
-                allComplete = true;
-
+            async function monitorWorkflows(github, context, workflows, prDetails) {
+              const workflowResults = {};
+              const workflowSummaries = {};
+              
+              while (Object.keys(workflowResults).length < workflows.length) {
                 for (const workflow of workflows) {
                   if (workflowResults[workflow]) continue;
 
@@ -137,49 +154,36 @@ jobs:
                         url: run.html_url
                       };
 
-                      // Get job summaries
-                      let summary = '';
                       try {
-                        const jobsResponse = await github.rest.actions.listJobsForWorkflowRun({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          run_id: run.id
-                        });
-
-                        for (const job of jobsResponse.data.jobs) {
-                          const jobId = job.html_url.split('/').pop();
-                          const summaryUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}/jobs/${jobId}/summary_raw`;
-                          
-                          try {
-                            const response = await fetch(summaryUrl);
-                            if (response.ok) {
-                              const summaryText = await response.text();
-                              if (summaryText) {
-                                summary += `\n\nJob Summary for ${job.name}:\n${summaryText}`;
-                              }
-                            }
-                          } catch (e) {
-                            // Continue if we can't get a particular job summary
-                          }
-                        }
-                        workflowSummaries[workflow] = summary;
+                        workflowSummaries[workflow] = await getJobSummaries(github, context, run);
                       } catch (e) {
-                        // Continue without summaries if we can't get job info
+                        workflowSummaries[workflow] = '';
                       }
-                    } else {
-                      allComplete = false;
                     }
-                  } else {
-                    allComplete = false;
                   }
                 }
-
-                if (!allComplete) {
-                  await new Promise(resolve => setTimeout(resolve, 30000)); // Check every 30 seconds
+                
+                if (Object.keys(workflowResults).length < workflows.length) {
+                  await new Promise(resolve => setTimeout(resolve, 30000));
                 }
               }
 
-              // Build final status message
+              return { workflowResults, workflowSummaries };
+            }
+
+            try {
+              const botComment = await findOrCreateBotComment(github, context);
+              let botCommentId = botComment?.id;
+
+              const initialMessage = `Triggered workflows: ${workflows.join(', ')}\nUsing code from: [${prDetails.head_repo}@${prDetails.head_ref}](https://github.com/${prDetails.head_repo}/tree/${prDetails.head_ref})\n:hourglass: Waiting for results... :hourglass:`;
+              
+              botCommentId = await updateBotComment(github, context, botCommentId, initialMessage);
+
+              await triggerWorkflows(github, context, workflows, prDetails);
+              await new Promise(resolve => setTimeout(resolve, 30000));
+
+              const { workflowResults, workflowSummaries } = await monitorWorkflows(github, context, workflows, prDetails);
+
               let statusMessage = 'Workflow results:\n';
               for (const workflow of workflows) {
                 const result = workflowResults[workflow];
@@ -189,22 +193,9 @@ jobs:
                 }
               }
 
-              // Update the bot comment with final results
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botCommentId,
-                body: statusMessage
-              });
+              await updateBotComment(github, context, botCommentId, statusMessage);
               
             } catch (error) {
               const errorMessage = `Error with workflows: ${error.message}`;
-              
-              // Update the bot comment with error message
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botCommentId,
-                body: errorMessage
-              });
+              await updateBotComment(github, context, botCommentId, errorMessage);
             }
