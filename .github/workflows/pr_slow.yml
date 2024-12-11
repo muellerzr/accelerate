@@ -71,7 +71,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `Triggered workflows: ${workflows.join(', ')}\nUsing code from: ${prDetails.head_repo}@${prDetails.head_ref}\nWaiting for results...`
+                body: `Triggered workflows: ${workflows.join(', ')}\nUsing code from: ${prDetails.head_repo}@${prDetails.head_ref}\n:hourglass: Waiting for results... :hourglass:`
               });
               commentId = initialComment.data.id;
 
@@ -161,7 +161,7 @@ jobs:
               let statusMessage = 'Workflow results:\n';
               for (const workflow of workflows) {
                 const result = workflowResults[workflow];
-                statusMessage += `\n${workflow}: ${result.conclusion}\nRun details: ${result.url}`;
+                statusMessage += `\n* ${workflow}: ${result.conclusion === 'success' ? '✅' : '❌'} ${result.conclusion} [Run Details](${result.url})`;
                 if (workflowSummaries[workflow]) {
                   statusMessage += workflowSummaries[workflow];
                 }
