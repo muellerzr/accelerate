@@ -121,26 +121,33 @@ jobs:
                 if (runs.data.workflow_runs.length > 0) {
                   const run = runs.data.workflow_runs[0];
                   if (run.status === 'completed') {
-                    // Get the step summary if it exists
+                    // Get the job summaries
                     let summary = '';
                     try {
-                      const summaryResponse = await github.rest.actions.getWorkflowRunAttempt({
+                      const jobsResponse = await github.rest.actions.listJobsForWorkflowRun({
                         owner: context.repo.owner,
                         repo: context.repo.repo,
-                        run_id: run.id,
-                        attempt_number: run.run_attempt
+                        run_id: run.id
                       });
-                      if (summaryResponse.data.steps) {
-                        const stepSummaries = summaryResponse.data.steps
-                          .filter(step => step.step_summary || step.summary)
-                          .map(step => step.step_summary || step.summary)
-                          .join('\n');
-                        if (stepSummaries) {
-                          summary = `\n\nStep Summary:\n${stepSummaries}`;
+
+                      for (const job of jobsResponse.data.jobs) {
+                        const jobId = job.html_url.split('/').pop();
+                        const summaryUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}/jobs/${jobId}/summary_raw`;
+                        
+                        try {
+                          const response = await fetch(summaryUrl);
+                          if (response.ok) {
+                            const summaryText = await response.text();
+                            if (summaryText) {
+                              summary += `\n\nJob Summary for ${job.name}:\n${summaryText}`;
+                            }
+                          }
+                        } catch (e) {
+                          // If we can't get a particular job summary, continue to the next
                         }
                       }
                     } catch (e) {
-                      // If we can't get the summary, just continue without it
+                      // If we can't get job info, continue without summaries
                     }
 
                     await github.rest.issues.updateComment({
@@ -159,27 +166,34 @@ jobs:
               }
               
             } catch (error) {
-              // Try to get any step summaries from the error context
+              // Try to get any job summaries from the error context
               let summary = '';
               if (error.runId) {
                 try {
-                  const summaryResponse = await github.rest.actions.getWorkflowRunAttempt({
+                  const jobsResponse = await github.rest.actions.listJobsForWorkflowRun({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
-                    run_id: error.runId,
-                    attempt_number: 1
+                    run_id: error.runId
                   });
-                  if (summaryResponse.data.steps) {
-                    const stepSummaries = summaryResponse.data.steps
-                      .filter(step => step.step_summary || step.summary)
-                      .map(step => step.step_summary || step.summary)
-                      .join('\n');
-                    if (stepSummaries) {
-                      summary = `\n\nError Step Summary:\n${stepSummaries}`;
+
+                  for (const job of jobsResponse.data.jobs) {
+                    const jobId = job.html_url.split('/').pop();
+                    const summaryUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${error.runId}/jobs/${jobId}/summary_raw`;
+                    
+                    try {
+                      const response = await fetch(summaryUrl);
+                      if (response.ok) {
+                        const summaryText = await response.text();
+                        if (summaryText) {
+                          summary += `\n\nError Job Summary for ${job.name}:\n${summaryText}`;
+                        }
+                      }
+                    } catch (e) {
+                      // If we can't get a particular job summary, continue to the next
                     }
                   }
                 } catch (e) {
-                  // If we can't get the summary, just continue without it
+                  // If we can't get job info, continue without summaries
                 }
               }
 
