@@ -3,15 +3,11 @@ name: Manual Workflow Trigger
 on:
   issue_comment:
     types: [created, edited]
-  reaction:
-    types: [created]
 
 jobs:
   process-comment:
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '!run')) ||
-      (github.event_name == 'reaction' && github.event.reaction.content == '+1')
+    if: startsWith(github.event.comment.body, '!run')
     
     steps:
       - name: Check if user has write access
@@ -19,9 +15,7 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const username = github.event_name === 'issue_comment' 
-              ? context.payload.comment.user.login
-              : context.payload.sender.login;
+            const username = context.payload.comment.user.login;
             
             const response = await github.rest.repos.getCollaboratorPermissionLevel({
               owner: context.repo.owner,
@@ -51,13 +45,8 @@ jobs:
         if: steps.check_permissions.outputs.result == 'true'
         id: parse
         run: |
-          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
-            COMMENT="${{ github.event.comment.body }}"
-            WORKFLOW_NAME=$(echo "$COMMENT" | sed 's/!run //')
-          else
-            ORIGINAL_COMMENT="${{ github.event.comment.body }}"
-            WORKFLOW_NAME=$(echo "$ORIGINAL_COMMENT" | grep -o '!run .*' | sed 's/!run //')
-          fi
+          COMMENT="${{ github.event.comment.body }}"
+          WORKFLOW_NAME=$(echo "$COMMENT" | sed 's/!run //')
           echo "workflow=$WORKFLOW_NAME" >> $GITHUB_OUTPUT
 
       - name: Trigger workflow and update comment
@@ -80,21 +69,12 @@ jobs:
                 }
               });
 
-              if (github.event_name === 'issue_comment') {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: `Triggered workflow: ${workflow}\nStatus: In Progress...`
-                });
-              } else {
-                const comment = await github.rest.issues.updateComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: context.payload.comment.id,
-                  body: `Triggered workflow: ${workflow}\nStatus: In Progress...\n\nRe-running workflow based on :+1: reaction`
-                });
-              }
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `Triggered workflow: ${workflow}\nStatus: In Progress...`
+              });
             } catch (error) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
