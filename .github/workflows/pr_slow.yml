@@ -43,7 +43,7 @@ jobs:
         id: parse
         run: |
           COMMENT="${{ github.event.comment.body }}"
-          WORKFLOW_NAME=$(echo "$COMMENT" | sed 's/!run //')
+          WORKFLOW_NAME=$(echo "$COMMENT" | awk -F'\n' '/^!run/ {sub(/^!run */, ""); print $1; exit}')
           echo "workflow=$WORKFLOW_NAME" >> $GITHUB_OUTPUT
       - name: Trigger workflow
         if: steps.check_permissions.outputs.result == 'true'
