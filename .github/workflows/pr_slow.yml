@@ -100,11 +100,26 @@ jobs:
                 if (runs.data.workflow_runs.length > 0) {
                   const run = runs.data.workflow_runs[0];
                   if (run.status === 'completed') {
+                    // Get the run summary if it exists
+                    let summary = '';
+                    try {
+                      const summaryResponse = await github.rest.actions.downloadWorkflowRunLogs({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        run_id: run.id
+                      });
+                      if (summaryResponse.data) {
+                        summary = `\n\nSummary:\n${summaryResponse.data}`;
+                      }
+                    } catch (e) {
+                      // If we can't get the summary, just continue without it
+                    }
+
                     await github.rest.issues.updateComment({
                       owner: context.repo.owner,
                       repo: context.repo.repo,
                       comment_id: commentId,
-                      body: `Workflow ${workflow} completed with status: ${run.conclusion}\nRun details: ${run.html_url}`
+                      body: `Workflow ${workflow} completed with status: ${run.conclusion}\nRun details: ${run.html_url}${summary}`
                     });
                     isComplete = true;
                   }
@@ -116,7 +131,24 @@ jobs:
               }
               
             } catch (error) {
-              const errorMessage = `Error with workflow: ${error.message}`;
+              // Try to get any step summaries from the error context
+              let summary = '';
+              if (error.runId) {
+                try {
+                  const summaryResponse = await github.rest.actions.downloadWorkflowRunLogs({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    run_id: error.runId
+                  });
+                  if (summaryResponse.data) {
+                    summary = `\n\nError Summary:\n${summaryResponse.data}`;
+                  }
+                } catch (e) {
+                  // If we can't get the summary, just continue without it
+                }
+              }
+
+              const errorMessage = `Error with workflow: ${error.message}${summary}`;
               if (commentId) {
                 await github.rest.issues.updateComment({
                   owner: context.repo.owner,
